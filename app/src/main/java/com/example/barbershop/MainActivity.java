@@ -17,6 +17,13 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
 
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
+import com.google.api.services.drive.Drive;
+import com.google.api.services.drive.model.File;
+import com.google.api.services.drive.model.FileList;
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 public class MainActivity extends Activity {
     GoogleSignInClient googleClient;
@@ -26,6 +33,7 @@ public class MainActivity extends Activity {
 
     public void onCreate(Bundle b){super.onCreate(b); prefs=getSharedPreferences("BarberShopData",MODE_PRIVATE); loadData(); setupGoogleSignIn(); scheduleAutomaticBackup(); showDashboard();}
     void setupGoogleSignIn(){ GoogleSignInOptions options=new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestScopes(new com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/drive.file")).build(); googleClient=GoogleSignIn.getClient(this,options); }
+    Drive getDriveService(GoogleSignInAccount account){ GoogleAccountCredential credential=GoogleAccountCredential.usingOAuth2(this,Collections.singleton("https://www.googleapis.com/auth/drive.file")); credential.setSelectedAccount(account.getAccount()); return new Drive.Builder(new NetHttpTransport(),new GsonFactory(),credential).setApplicationName("BarberShopManager").build(); }
 
     void scheduleAutomaticBackup(){ PeriodicWorkRequest request=new PeriodicWorkRequest.Builder(BackupWorker.class,24,TimeUnit.HOURS).build(); WorkManager.getInstance(this).enqueueUniquePeriodicWork("BarberShopAutomaticBackup",androidx.work.ExistingPeriodicWorkPolicy.KEEP,request); }
     TextView tv(String s,int size){ TextView t=new TextView(this); t.setText(s); t.setTextSize(size); t.setPadding(20,18,20,18); return t; }
@@ -52,8 +60,8 @@ public class MainActivity extends Activity {
         }
         root.addView(n);
     }
-    void backup(){ base("Backup & Restore"); content.addView(tv("Backup and restore your BarberShopManager data.",18)); Button b=btn("Create Backup"); content.addView(b); b.setOnClickListener(v->createBackup()); Button r=btn("Restore Backup"); content.addView(r); r.setOnClickListener(v->restoreBackup()); nav(); }
-    void createBackup(){ Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT); intent.setType("application/json"); intent.putExtra(Intent.EXTRA_TITLE,"BarberShop_Backup_"+new SimpleDateFormat("yyyy-MM-dd_HH-mm").format(new Date())+".json"); startActivityForResult(intent,2001); }
+    void backup(){ base("Backup & Restore"); content.addView(tv("Backup and restore your BarberShopManager data.",18)); Button google=btn("Connect Google Drive"); content.addView(google); google.setOnClickListener(v->startActivityForResult(googleClient.getSignInIntent(),3001)); Button b=btn("Create Backup"); content.addView(b); b.setOnClickListener(v->createBackup()); Button r=btn("Restore Backup"); content.addView(r); r.setOnClickListener(v->restoreBackup()); nav(); }
+    void createBackup(){ GoogleSignInAccount account=GoogleSignIn.getLastSignedInAccount(this); if(account==null){ Toast.makeText(this,"Please connect Google Drive first",Toast.LENGTH_SHORT).show(); return; } new Thread(()->{ try{ String json=new org.json.JSONObject(prefs.getAll()).toString(2); com.google.api.services.drive.Drive drive=getDriveService(account); java.util.List<com.google.api.services.drive.model.File> folders=drive.files().list().setQ("name='BarberShopManager' and mimeType='application/vnd.google-apps.folder' and trashed=false").setSpaces("drive").setFields("files(id,name)").execute().getFiles(); String folderId; if(folders!=null && !folders.isEmpty()){ folderId=folders.get(0).getId(); }else{ com.google.api.services.drive.model.File folder=new com.google.api.services.drive.model.File(); folder.setName("BarberShopManager"); folder.setMimeType("application/vnd.google-apps.folder"); folderId=drive.files().create(folder).setFields("id").execute().getId(); } com.google.api.services.drive.model.File fileMetadata=new com.google.api.services.drive.model.File(); fileMetadata.setName("BarberShop_Backup_"+new SimpleDateFormat("yyyy-MM-dd_HH-mm").format(new Date())+".json"); fileMetadata.setMimeType("application/json"); fileMetadata.setParents(java.util.Collections.singletonList(folderId)); com.google.api.client.http.ByteArrayContent content=new com.google.api.client.http.ByteArrayContent("application/json",json.getBytes("UTF-8")); com.google.api.services.drive.model.File uploaded=drive.files().create(fileMetadata,content).setFields("id,name,parents").execute(); drive.files().update(uploaded.getId(),new com.google.api.services.drive.model.File()).setAddParents(folderId).setRemoveParents("root").setFields("id,name,parents").execute(); runOnUiThread(()->Toast.makeText(this,"Backup uploaded. Parent: "+(uploaded.getParents()==null?"NONE":uploaded.getParents().toString()),Toast.LENGTH_LONG).show()); }catch(Exception e){ runOnUiThread(()->Toast.makeText(this,"Google Drive backup failed: "+e.getMessage(),Toast.LENGTH_LONG).show()); } }).start(); }
     void restoreBackup(){ Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT); intent.setType("application/json"); intent.addCategory(Intent.CATEGORY_OPENABLE); startActivityForResult(intent,2002); }
     void showDashboard(){
         base("💈 BARBER SHOP MANAGER");
@@ -333,6 +341,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int requestCode,int resultCode,android.content.Intent data){
         super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==3001){ if(resultCode==RESULT_OK && data!=null){ try{ GoogleSignInAccount account=GoogleSignIn.getSignedInAccountFromIntent(data).getResult(com.google.android.gms.common.api.ApiException.class); Toast.makeText(this,"Google Drive connected: "+account.getEmail(),Toast.LENGTH_LONG).show(); }catch(Exception e){ Toast.makeText(this,"Google Drive sign-in failed",Toast.LENGTH_SHORT).show(); } } else { Toast.makeText(this,"Google Drive sign-in cancelled",Toast.LENGTH_SHORT).show(); } }
         if(requestCode==2002 && resultCode==RESULT_OK && data!=null){ try{ Uri uri=data.getData(); java.io.InputStream in=getContentResolver().openInputStream(uri); java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(in,"UTF-8")); StringBuilder text=new StringBuilder(); String line; while((line=reader.readLine())!=null) text.append(line); reader.close(); org.json.JSONObject json=new org.json.JSONObject(text.toString()); android.content.SharedPreferences.Editor edit=prefs.edit(); java.util.Iterator<String> keys=json.keys(); while(keys.hasNext()){ String key=keys.next(); Object value=json.get(key); if(value instanceof Integer) edit.putInt(key,((Integer)value).intValue()); else if(value instanceof Long) edit.putLong(key,((Long)value).longValue()); else if(value instanceof Boolean) edit.putBoolean(key,((Boolean)value).booleanValue()); else if(value instanceof Float) edit.putFloat(key,((Float)value).floatValue()); else edit.putString(key,String.valueOf(value)); } edit.apply(); loadData(); Toast.makeText(this,"Backup restored successfully. Please reopen the screen.",Toast.LENGTH_LONG).show(); showDashboard(); }catch(Exception e){ Toast.makeText(this,"Could not restore backup",Toast.LENGTH_SHORT).show(); } }
         if(requestCode==2001 && resultCode==RESULT_OK && data!=null){ try{ Uri uri=data.getData(); OutputStream out=getContentResolver().openOutputStream(uri); String json=new org.json.JSONObject(prefs.getAll()).toString(2); out.write(json.getBytes("UTF-8")); out.close(); Toast.makeText(this,"Backup saved successfully",Toast.LENGTH_SHORT).show(); }catch(Exception e){ Toast.makeText(this,"Could not save backup",Toast.LENGTH_SHORT).show(); } }
         if(requestCode==1001 && resultCode==RESULT_OK && data!=null){
