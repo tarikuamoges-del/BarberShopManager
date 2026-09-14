@@ -1,4 +1,31 @@
-plugins { id 'com.android.application' }
-android { namespace 'com.example.barbershop'; compileSdk 35
-    defaultConfig { applicationId 'com.example.barbershop'; minSdk 24; targetSdk 35; versionCode 1; versionName '1.0' }
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.barbershop'
+    compileSdk 35
+
+    packaging {
+        resources {
+            excludes += [
+                'META-INF/INDEX.LIST',
+                'META-INF/DEPENDENCIES'
+            ]
+        }
+    }
+
+    defaultConfig {
+        applicationId 'com.example.barbershop'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+}
+
+dependencies {
+    implementation "androidx.work:work-runtime:2.10.1"
+    implementation "com.google.android.gms:play-services-auth:21.4.0"
+    implementation "com.google.apis:google-api-services-drive:v3-rev20240509-2.0.0"
 }
