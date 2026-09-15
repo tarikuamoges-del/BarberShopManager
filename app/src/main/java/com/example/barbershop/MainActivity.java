@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class MainActivity extends Activity {
     GoogleSignInClient googleClient;
     LinearLayout root, content; TextView total, count; double sales=0; int services=0;
-    ArrayList<String> records=new ArrayList<>();
+    ArrayList<String> records=new ArrayList<>(); ArrayList<String> salesLedger=new ArrayList<>();
     android.content.SharedPreferences prefs;
 
     public void onCreate(Bundle b){super.onCreate(b); prefs=getSharedPreferences("BarberShopData",MODE_PRIVATE); loadData(); setupGoogleSignIn(); scheduleAutomaticBackup(); showDashboard();}
@@ -49,12 +49,13 @@ public class MainActivity extends Activity {
     }
     void nav(){
         LinearLayout n=new LinearLayout(this);
-        String[] x={"Dashboard","New Sale","Services","Employees","Reports","Backup"};
+        String[] x={"Dashboard","New Sale","Services","Employees","Inventory","Reports","Backup"};
         for(String s:x){Button b=btn(s); n.addView(b,new LinearLayout.LayoutParams(0,60,1));
             if(s.equals("Dashboard")) b.setOnClickListener(v->showDashboard());
             if(s.equals("New Sale")) b.setOnClickListener(v->newSale());
             if(s.equals("Services")) b.setOnClickListener(v->services());
             if(s.equals("Employees")) b.setOnClickListener(v->employees());
+            if(s.equals("Inventory")) b.setOnClickListener(v->inventory());
             if(s.equals("Reports")) b.setOnClickListener(v->reports());
             if(s.equals("Backup")) b.setOnClickListener(v->backup());
         }
@@ -148,7 +149,7 @@ public class MainActivity extends Activity {
 
                 String barberName=barber.getSelectedItem().toString();
             String now=new SimpleDateFormat("HH:mm").format(new Date());
-              records.add(0,"#"+customerNo+" • "+now+" • "+customer.getText()+" • "+service.getSelectedItem()+" • ETB "+p+" • "+barberName+" • "+paymentMethod);
+              records.add(0,"#"+customerNo+" • "+now+" • "+customer.getText()+" • "+service.getSelectedItem()+" • ETB "+p+" • "+barberName+" • "+paymentMethod); salesLedger.add(0,customerNo+"~"+now+"~"+customer.getText()+"~"+service.getSelectedItem()+"~"+p+"~"+barberName+"~"+paymentMethod);
 
             saveData();
 
@@ -158,6 +159,97 @@ public class MainActivity extends Activity {
 
         nav();
     }
+    void inventory(){
+        base("Inventory");
+        content.addView(tv("Stock & Products",20));
+        Button add=btn("Add Product");
+        content.addView(add);
+        add.setOnClickListener(v->{
+            EditText name=new EditText(this);
+            name.setHint("Product name");
+            content.addView(name);
+            EditText category=new EditText(this);
+            category.setHint("Category");
+            content.addView(category);
+            EditText cost=new EditText(this);
+            cost.setHint("Purchase cost (ETB)");
+            cost.setInputType(2|8192);
+            content.addView(cost);
+            EditText sell=new EditText(this);
+            sell.setHint("Selling price (ETB)");
+            sell.setInputType(2|8192);
+            content.addView(sell);
+            EditText qty=new EditText(this);
+            qty.setHint("Current quantity");
+            qty.setInputType(2);
+            content.addView(qty);
+            EditText min=new EditText(this);
+            min.setHint("Minimum stock level");
+            min.setInputType(2);
+            content.addView(min);
+            Button save=btn("Save Product");
+            content.addView(save);
+            save.setOnClickListener(x->{
+                String n=name.getText().toString().trim();
+                String c=category.getText().toString().trim();
+                String co=cost.getText().toString().trim();
+                String se=sell.getText().toString().trim();
+                String q=qty.getText().toString().trim();
+                String m=min.getText().toString().trim();
+                if(n.isEmpty()||co.isEmpty()||se.isEmpty()||q.isEmpty()||m.isEmpty()){
+                    Toast.makeText(this,"Enter product name, prices and quantities",Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String old=prefs.getString("inventory","");
+                String item=n+"~"+c+"~"+co+"~"+se+"~"+q+"~"+m;
+                String updated=old.isEmpty()?item:old+"|"+item;
+                prefs.edit().putString("inventory",updated).apply();
+                inventory();
+            });
+        });
+        String saved=prefs.getString("inventory","");
+        if(!saved.isEmpty()){
+            content.addView(tv("Current Stock",20));
+            for(String item:saved.split("\\|")){
+                if(!item.isEmpty()){
+                    String[] p=item.split("~",-1);
+                    if(p.length>=6){
+                        double quantity=0;
+                        double minimum=0;
+                        try{quantity=Double.parseDouble(p[4]);}catch(Exception e){}
+                        try{minimum=Double.parseDouble(p[5]);}catch(Exception e){}
+                        String status=quantity<=minimum?"  ⚠ LOW STOCK":"";
+                    Button addStock=btn("+ Stock");
+                    Button removeStock=btn("- Stock");
+                    content.addView(addStock);
+                    content.addView(removeStock);
+                    addStock.setOnClickListener(v->{updateInventoryQuantity(p[0],Double.parseDouble(p[4])+1);});
+                    removeStock.setOnClickListener(v->{updateInventoryQuantity(p[0],Math.max(0,Double.parseDouble(p[4])-1));});
+                        content.addView(tv(p[0]+"  •  Qty: "+p[4]+"  •  Sell: ETB "+p[3]+status,17));
+                    }
+                }
+            }
+        }
+        nav();
+    }
+    void updateInventoryQuantity(String product,double newQty){
+        String saved=prefs.getString("inventory","");
+        StringBuilder updated=new StringBuilder();
+        for(String item:saved.split("\\|")){
+            if(item.isEmpty()) continue;
+            String[] p=item.split("~",-1);
+            if(p.length>=6 && p[0].equals(product)){
+                p[4]=String.valueOf(newQty);
+                item=p[0]+"~"+p[1]+"~"+p[2]+"~"+p[3]+"~"+p[4]+"~"+p[5];
+            }
+            if(updated.length()>0) updated.append("|");
+            updated.append(item);
+        }
+        prefs.edit().putString("inventory",updated.toString()).apply();
+        Toast.makeText(this,"Stock updated",Toast.LENGTH_SHORT).show();
+        inventory();
+    }
+
       void services(){
           base("Services & Prices");
           String[] defaults={"Haircut","Beard","Hair + Beard","Hair Wash","Full Service"};
@@ -246,8 +338,7 @@ public class MainActivity extends Activity {
           });
             content.addView(row);
         }
-      void employees(){
-          EditText e=new EditText(this);
+    void employees(){ base("Employees"); EditText e=new EditText(this);
         e.setHint("Employee name");
         content.addView(e);
         Button add=btn("Add Employee");
@@ -294,6 +385,7 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        content.addView(tv("Employee Performance",20)); for(String emp:saved.split("\\|")){ if(!emp.isEmpty()){ int empCount=0; double empSales=0; for(String sale:salesLedger){ String[] p=sale.split("~",-1); if(p.length>=7 && p[5].equals(emp)){ empCount++; try{empSales+=Double.parseDouble(p[4]);}catch(Exception ex){} } } content.addView(tv(emp+"  •  Services: "+empCount+"  •  Sales: ETB "+String.format("%.2f",empSales),17)); } }
         nav();
     }
     void recordsTable(){
@@ -368,7 +460,7 @@ public class MainActivity extends Activity {
         }
     }
     void saveData(){
-        getSharedPreferences("BarberShopData",MODE_PRIVATE).edit().putString("sales",String.valueOf(sales)).putInt("services",services).putString("records",join(records)).apply();
+        getSharedPreferences("BarberShopData",MODE_PRIVATE).edit().putString("sales",String.valueOf(sales)).putInt("services",services).putString("records",join(records)).putString("salesLedger",join(salesLedger)).apply();
     }
     String join(ArrayList<String> list){
         StringBuilder r=new StringBuilder();
@@ -384,6 +476,6 @@ public class MainActivity extends Activity {
     void loadData(){
         sales=Double.parseDouble(prefs.getString("sales","0"));
         services=prefs.getInt("services",0);
-        records=split(prefs.getString("records",""));
+        records=split(prefs.getString("records","")); salesLedger=split(prefs.getString("salesLedger",""));
     }
 }
