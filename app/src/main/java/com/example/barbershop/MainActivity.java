@@ -31,6 +31,7 @@ public class MainActivity extends Activity {
     ArrayList<String> records=new ArrayList<>(); ArrayList<String> salesLedger=new ArrayList<>();
 ArrayList<String> cartItems=new ArrayList<>();
     android.content.SharedPreferences prefs;
+    String reportFrom="", reportTo="";
 
     public void onCreate(Bundle b){super.onCreate(b); prefs=getSharedPreferences("BarberShopData",MODE_PRIVATE); loadData(); setupGoogleSignIn(); scheduleAutomaticBackup(); showDashboard();}
     void setupGoogleSignIn(){ GoogleSignInOptions options=new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestScopes(new com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/drive.file")).build(); googleClient=GoogleSignIn.getClient(this,options); }
@@ -176,7 +177,7 @@ void newSale(){
 
         String paymentMethod=payment.getSelectedItem().toString();
         String barberName=barber.getSelectedItem().toString();
-        String now=new SimpleDateFormat("HH:mm").format(new Date());
+        String now=new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date());
 
         records.add(0,
             "#"+customerNo+" • "+now+" • "+customer.getText()+" • "+
@@ -583,17 +584,311 @@ void updateCartDisplay(){
         scroll.addView(table);
         content.addView(scroll,new LinearLayout.LayoutParams(-1,-2));
     }
-    void reports(){
-        base("Daily Report");
-        content.addView(tv(new SimpleDateFormat("dd MMM yyyy").format(new Date()),18));
-        content.addView(tv(String.format("TOTAL SALES\nETB %.2f",sales),28));
-        content.addView(tv("SERVICES\n"+services,22));
-        Button download=btn("Download Report (CSV)");
-        content.addView(download);
-        download.setOnClickListener(v->downloadReport());
-        recordsTable();
-        nav();
+    void reports(){ base("Reports"); content.addView(tv("Choose report period",20)); Button today=btn("Today"); content.addView(today); today.setOnClickListener(v->{ String d=new SimpleDateFormat("yyyy-MM-dd").format(new Date()); showFilteredReport("Today",d,d); }); Button yesterday=btn("Yesterday"); content.addView(yesterday); yesterday.setOnClickListener(v->{ java.util.Calendar c=java.util.Calendar.getInstance(); c.add(java.util.Calendar.DAY_OF_MONTH,-1); String d=new SimpleDateFormat("yyyy-MM-dd").format(c.getTime()); showFilteredReport("Yesterday",d,d); }); Button week=btn("This Week"); content.addView(week); week.setOnClickListener(v->{ java.util.Calendar c=java.util.Calendar.getInstance(); c.set(java.util.Calendar.DAY_OF_WEEK,c.getFirstDayOfWeek()); String from=new SimpleDateFormat("yyyy-MM-dd").format(c.getTime()); c.add(java.util.Calendar.DAY_OF_MONTH,6); String to=new SimpleDateFormat("yyyy-MM-dd").format(c.getTime()); showFilteredReport("This Week",from,to); }); Button month=btn("This Month"); content.addView(month); month.setOnClickListener(v->{ java.util.Calendar c=java.util.Calendar.getInstance(); c.set(java.util.Calendar.DAY_OF_MONTH,1); String from=new SimpleDateFormat("yyyy-MM-dd").format(c.getTime()); c.add(java.util.Calendar.MONTH,1); c.add(java.util.Calendar.DAY_OF_MONTH,-1); String to=new SimpleDateFormat("yyyy-MM-dd").format(c.getTime()); showFilteredReport("This Month",from,to); }); Button custom=btn("Custom Date Range"); content.addView(custom); custom.setOnClickListener(v->chooseCustomReportDates()); nav(); }
+void showFilteredReport(String title,String from,String to){
+    reportFrom=from;
+    reportTo=to;
+    base(title);
+
+    double totalSales=0;
+    int transactionCount=0;
+
+    for(String sale:salesLedger){
+        if(!saleInRange(sale,from,to)) continue;
+        String[] p=sale.split("~",-1);
+        if(p.length>=7){
+            try{ totalSales+=Double.parseDouble(p[4]); }catch(Exception e){}
+            transactionCount++;
+        }
     }
+
+    content.addView(tv("REPORT PERIOD",22));
+    content.addView(tv(from+"  →  "+to,17));
+    content.addView(tv("TOTAL SALES: ETB "+String.format("%.2f",totalSales),28));
+    content.addView(tv("CUSTOMERS / TRANSACTIONS: "+transactionCount,20));
+
+        content.addView(tv("\nEMPLOYEE SUMMARY",22));
+
+        String savedEmployees=prefs.getString("employees","");
+        double employeeSalesTotal=0;
+        double employeeChargeTotal=0;
+        int employeeTransactionTotal=0;
+
+        if(savedEmployees.isEmpty()){
+            content.addView(tv("No employees added.",16));
+        }else{
+            HorizontalScrollView empScroll=new HorizontalScrollView(this);
+            TableLayout empTable=new TableLayout(this);
+            empTable.setStretchAllColumns(false);
+
+            TableRow empHeader=new TableRow(this);
+            String[] empHeads={"Employee","Transactions","Sales ETB","Service Charge ETB"};
+
+            for(String h:empHeads){
+                TextView t=tv(h,15);
+                t.setSingleLine(true);
+                t.setTextColor(Color.WHITE);
+                t.setBackgroundColor(Color.rgb(50,50,50));
+                empHeader.addView(t,new TableRow.LayoutParams(190,70));
+            }
+            empTable.addView(empHeader);
+
+            for(String emp:savedEmployees.split(java.util.regex.Pattern.quote("|"))){
+                if(emp.isEmpty()) continue;
+
+                int empCount=0;
+                double empSales=0;
+
+                for(String sale:salesLedger){
+                    if(!saleInRange(sale,from,to)) continue;
+                    String[] p=sale.split("~",-1);
+
+                    if(p.length>=7 && p[5].equals(emp)){
+                        empCount++;
+                        try{ empSales+=Double.parseDouble(p[4]); }catch(Exception e){}
+                    }
+                }
+
+                double empCharge=serviceChargeForEmployee(emp,from,to);
+
+                employeeTransactionTotal+=empCount;
+                employeeSalesTotal+=empSales;
+                employeeChargeTotal+=empCharge;
+
+                TableRow row=new TableRow(this);
+
+                String[] values={
+                    emp,
+                    String.valueOf(empCount),
+                    String.format("%.2f",empSales),
+                    String.format("%.2f",empCharge)
+                };
+
+                for(String value:values){
+                    TextView t=tv(value,14);
+                    t.setSingleLine(false);
+                    t.setMaxLines(3);
+                    row.addView(t,new TableRow.LayoutParams(190,-2));
+                }
+
+                empTable.addView(row);
+            }
+
+            TableRow totalRow=new TableRow(this);
+            String[] totals={
+                "TOTAL",
+                String.valueOf(employeeTransactionTotal),
+                String.format("%.2f",employeeSalesTotal),
+                String.format("%.2f",employeeChargeTotal)
+            };
+
+            for(String value:totals){
+                TextView t=tv(value,15);
+                t.setSingleLine(false);
+                t.setMaxLines(3);
+                totalRow.addView(t,new TableRow.LayoutParams(190,-2));
+            }
+
+            empTable.addView(totalRow);
+            empScroll.addView(empTable);
+            content.addView(empScroll,new LinearLayout.LayoutParams(-1,-2));
+        }
+
+        content.addView(tv("\nPRODUCT SUMMARY",22));
+        String inventorySaved=prefs.getString("inventory","");
+        double productSalesTotal=0;
+        int productQtyTotal=0;
+        boolean productFound=false;
+
+        HorizontalScrollView productScroll=new HorizontalScrollView(this);
+        TableLayout productTable=new TableLayout(this);
+        productTable.setStretchAllColumns(false);
+
+        TableRow productHeader=new TableRow(this);
+        String[] productHeads={"Product","Qty Sold","Sales ETB","Inventory"};
+        for(String h:productHeads){
+            TextView t=tv(h,15);
+            t.setSingleLine(true);
+            t.setTextColor(Color.WHITE);
+            t.setBackgroundColor(Color.rgb(50,50,50));
+            productHeader.addView(t,new TableRow.LayoutParams(190,70));
+        }
+        productTable.addView(productHeader);
+        if(!inventorySaved.isEmpty()){
+            for(String stock:inventorySaved.split(java.util.regex.Pattern.quote("|"))){
+                String[] sp=stock.split("~",-1);
+                if(sp.length<6) continue;
+                String productName=sp[0];
+                int qty=0;
+                double productSales=0;
+
+                for(String sale:salesLedger){
+                    if(!saleInRange(sale,from,to)) continue;
+                    String[] p=sale.split("~",-1);
+                    if(p.length<7) continue;
+                    for(String part:p[3].split(", ")){
+                        if(part.startsWith(productName+" x")){
+                            try{
+                                int pos=part.lastIndexOf(" x");
+                                int q=Integer.parseInt(part.substring(pos+2).trim());
+                                double price=Double.parseDouble(sp[3]);
+                                if(p.length>=8){
+                                    for(String hp:p[7].split(", ")){
+                                        if(hp.startsWith(productName+" x")){
+                                            price=Double.parseDouble(hp.substring(hp.lastIndexOf("@")+1).trim());
+                                            break;
+                                        }
+                                    }
+                                }
+                                qty+=q;
+                                productSales+=price*q;
+                            }catch(Exception e){}
+                        }
+                    }
+                }
+
+                if(qty>0){
+                    productFound=true;
+                    productQtyTotal+=qty;
+                    productSalesTotal+=productSales;
+                    double currentInventory=0;
+                    double minimumInventory=0;
+                    try{currentInventory=Double.parseDouble(sp[4]);}catch(Exception e){}
+                    try{minimumInventory=Double.parseDouble(sp[5]);}catch(Exception e){}
+                    String inventoryStatus=currentInventory<=minimumInventory ? "LOW INV" : "";
+                    TableRow row=new TableRow(this);
+                    String[] values={productName,String.valueOf(qty),String.format("%.2f",productSales),inventoryStatus};
+                    for(String value:values){
+                        TextView t=tv(value,14);
+                        t.setSingleLine(false);
+                        t.setMaxLines(3);
+                        row.addView(t,new TableRow.LayoutParams(190,-2));
+                    }
+                    productTable.addView(row);
+                }
+            }
+        }
+        if(!productFound){
+            TableRow row=new TableRow(this);
+            TextView t=tv("No products sold in this period.",16);
+            row.addView(t,new TableRow.LayoutParams(760,-2));
+            productTable.addView(row);
+        }
+
+        TableRow productTotalRow=new TableRow(this);
+        String[] productTotals={"TOTAL PRODUCT SALES",String.valueOf(productQtyTotal),String.format("%.2f",productSalesTotal),""};
+        for(String value:productTotals){
+            TextView t=tv(value,15);
+            t.setSingleLine(false);
+            t.setMaxLines(3);
+            productTotalRow.addView(t,new TableRow.LayoutParams(190,-2));
+        }
+        productTable.addView(productTotalRow);
+        productScroll.addView(productTable);
+        content.addView(productScroll,new LinearLayout.LayoutParams(-1,-2));
+        content.addView(tv("\nTRANSACTION DETAILS",22));
+
+        java.util.ArrayList<String> detailNames=new java.util.ArrayList<>();
+        java.util.ArrayList<Integer> detailQtys=new java.util.ArrayList<>();
+        java.util.ArrayList<Double> detailSales=new java.util.ArrayList<>();
+
+        for(String sale:salesLedger){
+            if(!saleInRange(sale,from,to)) continue;
+            String[] p=sale.split("~",-1);
+            if(p.length<7) continue;
+            String serviceText=p[3];
+            String historicalPrices=p.length>=8 ? p[7] : "";
+
+            for(String part:serviceText.split(", ")){
+                try{
+                    int pos=part.lastIndexOf(" x");
+                    if(pos<=0) continue;
+                    String itemName=part.substring(0,pos);
+                    boolean isProduct=false; for(String stock:inventorySaved.split(java.util.regex.Pattern.quote("|"))){ String[] sp=stock.split("~",-1); if(sp.length>=6 && sp[0].equals(itemName)){ isProduct=true; break; } } if(isProduct) continue;
+                    int qty=Integer.parseInt(part.substring(pos+2).trim());
+                    double price=0;
+                    if(!historicalPrices.isEmpty()){
+                        for(String hp:historicalPrices.split(", ")){
+                            if(hp.startsWith(itemName+" x")){
+                                price=Double.parseDouble(hp.substring(hp.lastIndexOf("@")+1).trim());
+                                break;
+                            }
+                        }
+                    }
+                    if(price==0) price=Double.parseDouble(prefs.getString("price_"+itemName,"0"));
+                    int existingIndex=detailNames.indexOf(itemName);
+                    if(existingIndex>=0){
+                        detailQtys.set(existingIndex,detailQtys.get(existingIndex)+qty);
+                        detailSales.set(existingIndex,detailSales.get(existingIndex)+(price*qty));
+                    }else{
+                        detailNames.add(itemName);
+                        detailQtys.add(qty);
+                        detailSales.add(price*qty);
+                    }
+                }catch(Exception e){}
+            }
+        }
+        double serviceSalesTotal=0;
+
+        HorizontalScrollView detailScroll=new HorizontalScrollView(this);
+        TableLayout detailTable=new TableLayout(this);
+        detailTable.setStretchAllColumns(false);
+
+        TableRow detailHeader=new TableRow(this);
+        String[] detailHeads={"Service / Product","Quantity","Sale ETB"};
+        for(String h:detailHeads){
+            TextView t=tv(h,15);
+            t.setSingleLine(true);
+            t.setTextColor(Color.WHITE);
+            t.setBackgroundColor(Color.rgb(50,50,50));
+            detailHeader.addView(t,new TableRow.LayoutParams(220,70));
+        }
+        detailTable.addView(detailHeader);
+
+        for(int i=0;i<detailNames.size();i++){
+            serviceSalesTotal+=detailSales.get(i);
+            TableRow row=new TableRow(this);
+            String[] values={detailNames.get(i),String.valueOf(detailQtys.get(i)),String.format("%.2f",detailSales.get(i))};
+            for(String value:values){
+                TextView t=tv(value,14);
+                t.setSingleLine(false);
+                t.setMaxLines(3);
+                row.addView(t,new TableRow.LayoutParams(220,-2));
+            }
+            detailTable.addView(row);
+        }
+
+        TableRow serviceTotalRow=new TableRow(this);
+        String[] serviceTotals={"TOTAL SERVICE SALE","",String.format("%.2f",serviceSalesTotal)};
+        for(String value:serviceTotals){
+            TextView t=tv(value,15);
+            t.setSingleLine(false);
+            t.setMaxLines(3);
+            serviceTotalRow.addView(t,new TableRow.LayoutParams(220,-2));
+        }
+        detailTable.addView(serviceTotalRow);
+        detailScroll.addView(detailTable);
+        content.addView(detailScroll,new LinearLayout.LayoutParams(-1,-2));
+        double grandTotal=productSalesTotal+serviceSalesTotal;
+        double serviceChargeTotal=employeeChargeTotal;
+        double subTotal=grandTotal-serviceChargeTotal;
+
+        content.addView(tv("\nGRAND TOTAL",22));
+        content.addView(tv("GRAND TOTAL: ETB "+String.format("%.2f",grandTotal),20));
+        content.addView(tv("SERVICE CHARGE: ETB "+String.format("%.2f",serviceChargeTotal),18));
+        content.addView(tv("SUB TOTAL: ETB "+String.format("%.2f",subTotal),22));
+    Button csv=btn("Download Selected Report (CSV)");
+    content.addView(csv);
+    csv.setOnClickListener(v->downloadSelectedReport());
+
+    Button back=btn("Back to Reports");
+    content.addView(back);
+    back.setOnClickListener(v->reports());
+
+    nav();
+}
+    void chooseCustomReportDates(){ java.util.Calendar c=java.util.Calendar.getInstance(); android.app.DatePickerDialog fromDialog=new android.app.DatePickerDialog(this,(view,year,month,day)->{ String from=String.format("%04d-%02d-%02d",year,month+1,day); android.app.DatePickerDialog toDialog=new android.app.DatePickerDialog(this,(view2,year2,month2,day2)->{ String to=String.format("%04d-%02d-%02d",year2,month2+1,day2); if(to.compareTo(from)<0){ Toast.makeText(this,"To date cannot be before From date",Toast.LENGTH_SHORT).show(); return; } showFilteredReport("Custom Report",from,to); },c.get(java.util.Calendar.YEAR),c.get(java.util.Calendar.MONTH),c.get(java.util.Calendar.DAY_OF_MONTH)); toDialog.setTitle("To date"); toDialog.show(); },c.get(java.util.Calendar.YEAR),c.get(java.util.Calendar.MONTH),c.get(java.util.Calendar.DAY_OF_MONTH)); fromDialog.setTitle("From date"); fromDialog.show(); }
+    void downloadSelectedReport(){ Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT); intent.setType("text/csv"); intent.putExtra(Intent.EXTRA_TITLE,"BarberShop_Report_"+reportFrom+"_to_"+reportTo+".csv"); startActivityForResult(intent,1002); }
     void downloadReport(){
         Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.setType("text/csv");
@@ -605,6 +900,7 @@ void updateCartDisplay(){
         if(requestCode==3001){ if(resultCode==RESULT_OK && data!=null){ try{ GoogleSignInAccount account=GoogleSignIn.getSignedInAccountFromIntent(data).getResult(com.google.android.gms.common.api.ApiException.class); Toast.makeText(this,"Google Drive connected: "+account.getEmail(),Toast.LENGTH_LONG).show(); }catch(Exception e){ Toast.makeText(this,"Google Drive sign-in failed",Toast.LENGTH_SHORT).show(); } } else { Toast.makeText(this,"Google Drive sign-in cancelled",Toast.LENGTH_SHORT).show(); } }
         if(requestCode==2002 && resultCode==RESULT_OK && data!=null){ try{ Uri uri=data.getData(); java.io.InputStream in=getContentResolver().openInputStream(uri); java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.InputStreamReader(in,"UTF-8")); StringBuilder text=new StringBuilder(); String line; while((line=reader.readLine())!=null) text.append(line); reader.close(); org.json.JSONObject json=new org.json.JSONObject(text.toString()); android.content.SharedPreferences.Editor edit=prefs.edit(); java.util.Iterator<String> keys=json.keys(); while(keys.hasNext()){ String key=keys.next(); Object value=json.get(key); if(value instanceof Integer) edit.putInt(key,((Integer)value).intValue()); else if(value instanceof Long) edit.putLong(key,((Long)value).longValue()); else if(value instanceof Boolean) edit.putBoolean(key,((Boolean)value).booleanValue()); else if(value instanceof Float) edit.putFloat(key,((Float)value).floatValue()); else edit.putString(key,String.valueOf(value)); } edit.apply(); loadData(); Toast.makeText(this,"Backup restored successfully. Please reopen the screen.",Toast.LENGTH_LONG).show(); showDashboard(); }catch(Exception e){ Toast.makeText(this,"Could not restore backup",Toast.LENGTH_SHORT).show(); } }
         if(requestCode==2001 && resultCode==RESULT_OK && data!=null){ try{ Uri uri=data.getData(); OutputStream out=getContentResolver().openOutputStream(uri); String json=new org.json.JSONObject(prefs.getAll()).toString(2); out.write(json.getBytes("UTF-8")); out.close(); Toast.makeText(this,"Backup saved successfully",Toast.LENGTH_SHORT).show(); }catch(Exception e){ Toast.makeText(this,"Could not save backup",Toast.LENGTH_SHORT).show(); } }
+        if(requestCode==1002 && resultCode==RESULT_OK && data!=null){ saveSelectedReportCsv(data.getData()); }
         if(requestCode==1001 && resultCode==RESULT_OK && data!=null){
             try{
                 Uri uri=data.getData();
@@ -627,6 +923,16 @@ void updateCartDisplay(){
                 Toast.makeText(this,"Could not save report",Toast.LENGTH_SHORT).show();
             }
         }
+    }
+    String saleDate(String sale){ String[] p=sale.split("~",-1); if(p.length<2) return ""; String value=p[1]; return value.length()>=10 ? value.substring(0,10) : ""; }
+    boolean saleInRange(String sale,String from,String to){ String d=saleDate(sale); return !d.isEmpty() && d.compareTo(from)>=0 && d.compareTo(to)<=0; }
+    double serviceChargeForEmployee(String emp,String from,String to){ double total=0; java.util.ArrayList<String> eligible=new java.util.ArrayList<>(); String[] defaults={"Haircut","Beard","Hair + Beard","Hair Wash","Full Service"}; String deleted=prefs.getString("deleted_services",""); for(String s:defaults){ if(!deleted.contains("|"+s+"|") && prefs.getBoolean("charge_"+s,false)) eligible.add(s); } String custom=prefs.getString("custom_services",""); if(!custom.isEmpty()){ for(String s:custom.split(java.util.regex.Pattern.quote("|"))){ if(!s.isEmpty() && prefs.getBoolean("charge_"+s,false)) eligible.add(s); } } for(String sale:salesLedger){ if(!saleInRange(sale,from,to)) continue; String[] p=sale.split("~",-1); if(p.length<7 || !p[5].equals(emp)) continue; for(String service:eligible){ for(String part:p[3].split(", ")){ if(part.startsWith(service+" x")){ try{ int pos=part.lastIndexOf(" x"); int qty=Integer.parseInt(part.substring(pos+2).trim()); double price=0; if(p.length>=8){ for(String hp:p[7].split(", ")){ if(hp.startsWith(service+" x")){ price=Double.parseDouble(hp.substring(hp.lastIndexOf("@")+1).trim()); break; } } } if(price==0) price=Double.parseDouble(prefs.getString("price_"+service,"0")); double pct=Double.parseDouble(prefs.getString("charge_pct_"+emp+"_"+service,"0")); total+=price*qty*pct/100.0; }catch(Exception e){} } } } } return total; }
+    void saveSelectedReportCsv(android.net.Uri uri){
+        try{ java.io.OutputStream out=getContentResolver().openOutputStream(uri); StringBuilder csv=new StringBuilder(); csv.append("BARBER SHOP REPORT\n"); csv.append("Period: ").append(reportFrom).append(" to ").append(reportTo).append("\n\n"); csv.append("TRANSACTIONS\n"); csv.append("#,Date & Time,Customer,Items / Services,Total ETB,Barber,Payment\n");
+            for(String sale:salesLedger){ if(!saleInRange(sale,reportFrom,reportTo)) continue; String[] p=sale.split("~",-1); if(p.length>=7){ csv.append(p[0]).append(",").append(p[1]).append(",").append(p[2]).append(",").append(p[3]).append(",").append(p[4]).append(",").append(p[5]).append(",").append(p[6]).append("\n"); } } csv.append("\n"); csv.append("EMPLOYEE SUMMARY\n"); csv.append("Employee,Transactions,Sales ETB,Service Charge ETB\n");
+        double allEmployeeSales=0; double allEmployeeCharge=0; int allEmployeeTransactions=0; String savedEmployees=prefs.getString("employees",""); if(!savedEmployees.isEmpty()){ for(String emp:savedEmployees.split(java.util.regex.Pattern.quote("|"))){ if(emp.isEmpty()) continue; int empTransactions=0; double empSales=0; for(String sale:salesLedger){ if(!saleInRange(sale,reportFrom,reportTo)) continue; String[] p=sale.split("~",-1); if(p.length>=7 && p[5].equals(emp)){ empTransactions++; try{ empSales+=Double.parseDouble(p[4]); }catch(Exception e){} } } double empCharge=serviceChargeForEmployee(emp,reportFrom,reportTo); allEmployeeTransactions+=empTransactions; allEmployeeSales+=empSales; allEmployeeCharge+=empCharge; csv.append(emp).append(",").append(empTransactions).append(",").append(String.format(java.util.Locale.US,"%.2f",empSales)).append(",").append(String.format(java.util.Locale.US,"%.2f",empCharge)).append("\n"); } } csv.append("TOTAL EMPLOYEES,").append(allEmployeeTransactions).append(",").append(String.format(java.util.Locale.US,"%.2f",allEmployeeSales)).append(",").append(String.format(java.util.Locale.US,"%.2f",allEmployeeCharge)).append("\n"); csv.append("\n"); csv.append("PRODUCT SUMMARY\n"); csv.append("Product,Quantity Sold,Sales ETB\n");
+        String inventorySaved=prefs.getString("inventory",""); double allProductSales=0; double allProductQty=0; if(!inventorySaved.isEmpty()){ for(String stock:inventorySaved.split(java.util.regex.Pattern.quote("|"))){ String[] sp=stock.split("~",-1); if(sp.length<6) continue; String productName=sp[0]; double productQty=0; double productSales=0; for(String sale:salesLedger){ if(!saleInRange(sale,reportFrom,reportTo)) continue; String[] p=sale.split("~",-1); if(p.length<7) continue; for(String part:p[3].split(", ")){ if(part.startsWith(productName+" x")){ try{ int pos=part.lastIndexOf(" x"); int qty=Integer.parseInt(part.substring(pos+2).trim()); double price=Double.parseDouble(sp[3]); if(p.length>=8){ for(String hp:p[7].split(", ")){ if(hp.startsWith(productName+" x")){ price=Double.parseDouble(hp.substring(hp.lastIndexOf("@")+1).trim()); break; } } } productQty+=qty; productSales+=price*qty; }catch(Exception e){} } } } if(productQty>0){ allProductQty+=productQty; allProductSales+=productSales; csv.append(productName).append(",").append((int)productQty).append(",").append(String.format(java.util.Locale.US,"%.2f",productSales)).append("\n"); } } } csv.append("TOTAL PRODUCTS,").append((int)allProductQty).append(",").append(String.format(java.util.Locale.US,"%.2f",allProductSales)).append("\n");
+        csv.append("\nGRAND TOTAL\n"); csv.append("TOTAL SALES,").append(String.format(java.util.Locale.US,"%.2f",allEmployeeSales)).append("\n"); out.write(csv.toString().getBytes("UTF-8")); out.close(); Toast.makeText(this,"Selected report saved successfully",Toast.LENGTH_SHORT).show(); }catch(Exception e){ Toast.makeText(this,"Could not save selected report",Toast.LENGTH_SHORT).show(); }
     }
     void saveData(){
         getSharedPreferences("BarberShopData",MODE_PRIVATE).edit().putString("sales",String.valueOf(sales)).putInt("services",services).putString("records",join(records)).putString("salesLedger",join(salesLedger)).apply();
