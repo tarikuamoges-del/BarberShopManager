@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     GoogleSignInClient googleClient;
     LinearLayout root, content; TextView total, count; double sales=0; int services=0;
     ArrayList<String> records=new ArrayList<>(); ArrayList<String> salesLedger=new ArrayList<>();
+ArrayList<String> cartItems=new ArrayList<>();
     android.content.SharedPreferences prefs;
 
     public void onCreate(Bundle b){super.onCreate(b); prefs=getSharedPreferences("BarberShopData",MODE_PRIVATE); loadData(); setupGoogleSignIn(); scheduleAutomaticBackup(); showDashboard();}
@@ -76,89 +77,187 @@ public class MainActivity extends Activity {
         recordsTable();
         nav();
     }
-    void newSale(){
-        base("New Service");
+void newSale(){
+    base("New Sale");
 
-        EditText customer=new EditText(this);
-        customer.setHint("Customer name / phone");
-        content.addView(customer);
+    EditText customer=new EditText(this);
+    customer.setHint("Customer name / phone");
+    content.addView(customer);
 
-        Spinner service=new Spinner(this);
-          String[] defaults={"Haircut","Beard","Hair + Beard","Hair Wash","Full Service"};
-          String deletedServices=prefs.getString("deleted_services","");
-          ArrayList<String> serviceList=new ArrayList<>();
-          for(String s:defaults){ if(!deletedServices.contains("|"+s+"|")) serviceList.add(s); }
-          String customServices=prefs.getString("custom_services","");
-        if(!customServices.isEmpty()){
-            for(String s:customServices.split("\\|")){
-                if(!s.isEmpty() && !serviceList.contains(s)) serviceList.add(s);
-            }
-        }
-        String[] sv=serviceList.toArray(new String[0]);
-        service.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,sv));
-        content.addView(service);
+    content.addView(tv("Add services:",20));
 
-        EditText price=new EditText(this);
-        price.setEnabled(false);
-        price.setHint("Price (ETB)");
-        price.setInputType(2);
-        content.addView(price);
+    String[] defaults={"Haircut","Beard","Hair + Beard","Hair Wash","Full Service"};
+    String deletedServices=prefs.getString("deleted_services","");
+    ArrayList<String> serviceList=new ArrayList<>();
 
-        String savedEmployees=prefs.getString("employees","");
-        String[] employeeList;
-        if(savedEmployees.isEmpty()){
-            employeeList=new String[]{"No employees added"};
-        }else{
-            employeeList=savedEmployees.split("\\|");
-        }
-
-        Spinner barber=new Spinner(this);
-        barber.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,employeeList));
-        content.addView(barber);
-
-        service.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            public void onItemSelected(android.widget.AdapterView<?> parent,android.view.View view,int position,long id){
-                String selected=sv[position];
-                String savedPrice=prefs.getString("price_"+selected,"");
-                price.setText(savedPrice);
-            }
-            public void onNothingSelected(android.widget.AdapterView<?> parent){}
-        });
-
-        Spinner payment=new Spinner(this);
-        String[] payments={"Cash","Card","Transfer","Other"};
-        payment.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,payments));
-        content.addView(payment);
-        Button save=btn("SAVE SERVICE");
-        content.addView(save);
-
-        save.setOnClickListener(v->{
-            double p=0;
-            try{p=Double.parseDouble(price.getText().toString());}catch(Exception e){}
-
-            if(p<=0){
-                Toast.makeText(this,"Please set a price first",Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-              int customerNo=prefs.getInt("customer_no",0)+1;
-              prefs.edit().putInt("customer_no",customerNo).apply();
-            sales+=p;
-                services++;
-            String paymentMethod=payment.getSelectedItem().toString();
-
-                String barberName=barber.getSelectedItem().toString();
-            String now=new SimpleDateFormat("HH:mm").format(new Date());
-              records.add(0,"#"+customerNo+" • "+now+" • "+customer.getText()+" • "+service.getSelectedItem()+" • ETB "+p+" • "+barberName+" • "+paymentMethod); salesLedger.add(0,customerNo+"~"+now+"~"+customer.getText()+"~"+service.getSelectedItem()+"~"+p+"~"+barberName+"~"+paymentMethod);
-
-            saveData();
-
-            Toast.makeText(this,"Service recorded",Toast.LENGTH_SHORT).show();
-            showDashboard();
-        });
-
-        nav();
+    for(String s:defaults){
+        if(!deletedServices.contains("|"+s+"|")) serviceList.add(s);
     }
+
+    String customServices=prefs.getString("custom_services","");
+    if(!customServices.isEmpty()){
+        for(String s:customServices.split("\\|")){
+            if(!s.isEmpty() && !serviceList.contains(s)) serviceList.add(s);
+        }
+    }
+    for(String item:serviceList){
+        Button add=btn(item+"  +"); content.addView(add); add.setOnClickListener(v->{ boolean found=false; for(int i=0;i<cartItems.size();i++){ String[] cp=cartItems.get(i).split("~",-1); if(cp.length>=2 && cp[0].equals(item)){ int newQty=Integer.parseInt(cp[1])+1; cartItems.set(i,item+"~"+newQty); found=true; break; } } if(!found) cartItems.add(item+"~1"); updateCartDisplay(); });
+    }
+    content.addView(tv("Add products:",20));
+    String savedInventory=prefs.getString("inventory",""); if(!savedInventory.isEmpty()){ for(String inv:savedInventory.split("\\|")){ String[] p=inv.split("~",-1); if(p.length>=6){ String productName=p[0]; Button addProduct=btn(productName+"  +"); content.addView(addProduct); addProduct.setOnClickListener(v->{ boolean found=false; for(int i=0;i<cartItems.size();i++){ String[] cp=cartItems.get(i).split("~",-1); if(cp.length>=2 && cp[0].equals(productName)){ int newQty=Integer.parseInt(cp[1])+1; cartItems.set(i,productName+"~"+newQty); found=true; break; } } if(!found) cartItems.add(productName+"~1"); updateCartDisplay(); }); } } }
+    String savedEmployees=prefs.getString("employees","");
+    String[] employeeList;
+
+    if(savedEmployees.isEmpty()){
+        employeeList=new String[]{"No employees added"};
+    }else{
+        employeeList=savedEmployees.split("\\|");
+    }
+
+    Spinner barber=new Spinner(this);
+    barber.setAdapter(new ArrayAdapter<String>(
+        this,
+        android.R.layout.simple_spinner_dropdown_item,
+        employeeList
+    ));
+    content.addView(barber);
+
+    Spinner payment=new Spinner(this);
+    String[] payments={"Cash","Card","Transfer","Other"};
+    payment.setAdapter(new ArrayAdapter<String>(
+        this,
+        android.R.layout.simple_spinner_dropdown_item,
+        payments
+    ));
+    content.addView(payment);
+
+    Button save=btn("SAVE SALE");
+    content.addView(save);
+
+    save.setOnClickListener(v->{
+        if(cartItems.isEmpty()){
+            Toast.makeText(this,"Please add at least one service",Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        double cartTotal=0;
+        StringBuilder saleServices=new StringBuilder();
+
+        StringBuilder salePrices=new StringBuilder();
+        for(String item:cartItems){
+            String[] p=item.split("~",-1);
+            if(p.length<2) continue;
+
+            String name=p[0];
+            int qty=Integer.parseInt(p[1]);
+            double price=0;
+
+            try{
+                price=Double.parseDouble(prefs.getString("price_"+name,"0"));
+            }catch(Exception e){}
+
+            cartTotal+=price*qty;
+
+            if(saleServices.length()>0) saleServices.append(", ");
+            if(salePrices.length()>0) salePrices.append(", "); salePrices.append(name).append(" x").append(qty).append(" @").append(price);
+            saleServices.append(name).append(" x").append(qty);
+        }
+
+        if(cartTotal<=0){
+            Toast.makeText(this,"Please set prices for the selected services",Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int customerNo=prefs.getInt("customer_no",0)+1;
+        prefs.edit().putInt("customer_no",customerNo).apply();
+
+        sales+=cartTotal;
+        services++;
+
+        String paymentMethod=payment.getSelectedItem().toString();
+        String barberName=barber.getSelectedItem().toString();
+        String now=new SimpleDateFormat("HH:mm").format(new Date());
+
+        records.add(0,
+            "#"+customerNo+" • "+now+" • "+customer.getText()+" • "+
+            saleServices+" • ETB "+cartTotal+" • "+barberName+" • "+paymentMethod
+        );
+
+        salesLedger.add(0,
+            customerNo+"~"+now+"~"+customer.getText()+"~"+
+            saleServices+"~"+cartTotal+"~"+barberName+"~"+paymentMethod+"~"+salePrices
+        );
+
+          for(String item:cartItems){ String[] cp=item.split("~",-1); if(cp.length>=2){ String product=cp[0]; int qty=Integer.parseInt(cp[1]); String inv=prefs.getString("inventory",""); StringBuilder updatedInv=new StringBuilder(); for(String stock:inv.split("\\|")){ if(stock.isEmpty()) continue; String[] sp=stock.split("~",-1); if(sp.length>=6 && sp[0].equals(product)){ double current=Double.parseDouble(sp[4]); sp[4]=String.valueOf(Math.max(0,current-qty)); stock=sp[0]+"~"+sp[1]+"~"+sp[2]+"~"+sp[3]+"~"+sp[4]+"~"+sp[5]; } if(updatedInv.length()>0) updatedInv.append("|"); updatedInv.append(stock); } prefs.edit().putString("inventory",updatedInv.toString()).apply(); } }
+        cartItems.clear();
+        saveData();
+
+        Toast.makeText(this,"Sale recorded",Toast.LENGTH_SHORT).show();
+        showDashboard();
+    });
+
+    nav();
+
+    content.addView(tv("Cart",20));
+    updateCartDisplay();
+
+    }
+
+void updateCartDisplay(){
+    for(int i=content.getChildCount()-1;i>=0;i--){
+        android.view.View v=content.getChildAt(i);
+        if("CART_ITEM".equals(v.getTag()) || "CART_TOTAL".equals(v.getTag())){
+            content.removeViewAt(i);
+        }
+    }
+    double cartTotal=0;
+    for(String item:cartItems){
+        String[] p=item.split("~",-1);
+        if(p.length<2) continue;
+        String name=p[0];
+        int qty=Integer.parseInt(p[1]);
+        double price=0;
+          try{ price=Double.parseDouble(prefs.getString("price_"+name,"0")); if(price==0){ String inv=prefs.getString("inventory",""); for(String stock:inv.split("\\|")){ String[] sp=stock.split("~",-1); if(sp.length>=6 && sp[0].equals(name)){ price=Double.parseDouble(sp[3]); break; } } } }catch(Exception e){}
+        cartTotal+=price*qty;
+        final String selectedName=name;
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setTag("CART_ITEM");
+        TextView label=tv(name+"  x"+qty+"  • ETB "+(price*qty),16);
+        Button minus=btn("−");
+        Button plus=btn("+");
+        row.addView(label,new LinearLayout.LayoutParams(0,70,1));
+        row.addView(minus,new LinearLayout.LayoutParams(70,70));
+        row.addView(plus,new LinearLayout.LayoutParams(70,70));
+        content.addView(row);
+        minus.setOnClickListener(v->{
+            for(int i=0;i<cartItems.size();i++){
+                String[] cp=cartItems.get(i).split("~",-1);
+                if(cp.length>=2 && cp[0].equals(selectedName)){
+                    int newQty=Integer.parseInt(cp[1])-1;
+                    if(newQty<=0) cartItems.remove(i);
+                    else cartItems.set(i,selectedName+"~"+newQty);
+                    break;
+                }
+            }
+            updateCartDisplay();
+        });        plus.setOnClickListener(v->{
+            for(int i=0;i<cartItems.size();i++){
+                String[] cp=cartItems.get(i).split("~",-1);
+                if(cp.length>=2 && cp[0].equals(selectedName)){
+                    int newQty=Integer.parseInt(cp[1])+1;
+                    cartItems.set(i,selectedName+"~"+newQty);
+                    break;
+                }
+            }
+            updateCartDisplay();
+        });    }
+
+    TextView totalView=tv("TOTAL: ETB "+String.format("%.2f",cartTotal),24);
+    totalView.setTag("CART_TOTAL");
+    content.addView(totalView);
+}
+
     void inventory(){
         base("Inventory");
         content.addView(tv("Stock & Products",20));
@@ -273,6 +372,7 @@ public class MainActivity extends Activity {
               price.setHint("Price (ETB)");
               price.setInputType(2);
               content.addView(price);
+                CheckBox charge=new CheckBox(this); charge.setText("Count for employee service charge"); content.addView(charge);
               Button save=btn("Save New Service");
               content.addView(save);
               save.setOnClickListener(x->{
@@ -284,7 +384,7 @@ public class MainActivity extends Activity {
                   }
                   String old=prefs.getString("custom_services","");
                   String updated=old.isEmpty()?n:old+"|"+n;
-                  prefs.edit().putString("custom_services",updated).putString("price_"+n,pr).apply();
+                  prefs.edit().putString("custom_services",updated).putString("price_"+n,pr).putBoolean("charge_"+n,charge.isChecked()).apply();
                   services();
               });
           });
@@ -292,9 +392,9 @@ public class MainActivity extends Activity {
       }
 
     void addServiceRow(String name,boolean custom){
+          TextView label=tv(name,18);
         LinearLayout row=new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        TextView label=tv(name,18);
+          CheckBox charge=new CheckBox(this); charge.setText("Charge"); charge.setChecked(prefs.getBoolean("charge_"+name,false)); row.addView(charge,new LinearLayout.LayoutParams(140,70));
         row.addView(label,new LinearLayout.LayoutParams(0,70,1));
         EditText price=new EditText(this);
         price.setHint("ETB");
@@ -306,7 +406,7 @@ public class MainActivity extends Activity {
         Button delete=btn("Delete");
         row.addView(delete,new LinearLayout.LayoutParams(110,70));
         save.setOnClickListener(v->{
-            prefs.edit().putString("price_"+name,price.getText().toString()).apply();
+            prefs.edit().putString("price_"+name,price.getText().toString()).putBoolean("charge_"+name,charge.isChecked()).apply();
             Toast.makeText(this,name+" price saved",Toast.LENGTH_SHORT).show();
         });
           delete.setOnClickListener(v->{
@@ -385,9 +485,78 @@ public class MainActivity extends Activity {
                 }
             }
         }
+          Button chargeBtn=btn("Calculate Service Charge"); content.addView(chargeBtn); chargeBtn.setOnClickListener(v->calculateServiceCharges());
         content.addView(tv("Employee Performance",20)); for(String emp:saved.split("\\|")){ if(!emp.isEmpty()){ int empCount=0; double empSales=0; for(String sale:salesLedger){ String[] p=sale.split("~",-1); if(p.length>=7 && p[5].equals(emp)){ empCount++; try{empSales+=Double.parseDouble(p[4]);}catch(Exception ex){} } } content.addView(tv(emp+"  •  Services: "+empCount+"  •  Sales: ETB "+String.format("%.2f",empSales),17)); } }
         nav();
     }
+    void calculateServiceCharges(){
+    for(int i=content.getChildCount()-1;i>=0;i--){ android.view.View v=content.getChildAt(i); if("SERVICE_CHARGE".equals(v.getTag())) content.removeViewAt(i); }
+        TextView chargeTitle=tv("Employee Service Charges",20); chargeTitle.setTag("SERVICE_CHARGE"); content.addView(chargeTitle);
+        String savedEmployees=prefs.getString("employees","");
+        if(savedEmployees.isEmpty()){
+            content.addView(tv("Add employees first.",17));
+            return;
+        }
+        ArrayList<String> eligible=new ArrayList<>();
+        String[] defaults={"Haircut","Beard","Hair + Beard","Hair Wash","Full Service"};
+        String deleted=prefs.getString("deleted_services","");
+        for(String s:defaults){
+            if(!deleted.contains("|"+s+"|") && prefs.getBoolean("charge_"+s,false)) eligible.add(s);
+        }
+        String custom=prefs.getString("custom_services","");
+        if(!custom.isEmpty()){
+            for(String s:custom.split("\\|")){
+                if(!s.isEmpty() && prefs.getBoolean("charge_"+s,false)) eligible.add(s);
+            }
+        }
+        if(eligible.isEmpty()){
+            TextView noCharge=tv("No services are marked for employee service charge.",17); noCharge.setTag("SERVICE_CHARGE"); content.addView(noCharge);
+            return;
+        }
+        for(String emp:savedEmployees.split("\\|")){
+            if(emp.isEmpty()) continue;
+            TextView empTitle=tv("\n"+emp,19); empTitle.setTag("SERVICE_CHARGE"); content.addView(empTitle);
+            for(String service:eligible){
+                LinearLayout row=new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.addView(tv(service,16),new LinearLayout.LayoutParams(0,70,1));
+                EditText pct=new EditText(this);
+                pct.setHint("%");
+                pct.setInputType(2|8192);
+                pct.setText(prefs.getString("charge_pct_"+emp+"_"+service,""));
+                row.addView(pct,new LinearLayout.LayoutParams(150,70));
+                Button savePct=btn("Save");
+                row.addView(savePct,new LinearLayout.LayoutParams(100,70));
+                savePct.setOnClickListener(v->{
+                    prefs.edit().putString("charge_pct_"+emp+"_"+service,pct.getText().toString()).apply();
+                    Toast.makeText(this,"Percentage saved",Toast.LENGTH_SHORT).show();
+                });
+                row.setTag("SERVICE_CHARGE"); content.addView(row);
+            }
+            double employeeCharge=0;
+            for(String sale:salesLedger){
+                String[] p=sale.split("~",-1);
+                if(p.length<7 || !p[5].equals(emp)) continue;
+                String serviceText=p[3];
+                for(String service:eligible){
+                    String marker=service+" x";
+                    for(String part:serviceText.split(", ")){
+                        if(part.startsWith(marker)){
+                            try{
+                                int pos=part.lastIndexOf(" x");
+                                int qty=Integer.parseInt(part.substring(pos+2).trim());
+                                double price=0; if(p.length>=8){ for(String hp:p[7].split(", ")){ if(hp.startsWith(service+" x")){ try{ price=Double.parseDouble(hp.substring(hp.lastIndexOf("@")+1).trim()); }catch(Exception ex){} break; } } } if(price==0) price=Double.parseDouble(prefs.getString("price_"+service,"0"));
+                                double pct=Double.parseDouble(prefs.getString("charge_pct_"+emp+"_"+service,"0"));
+                                employeeCharge += price*qty*pct/100.0;
+                            }catch(Exception ex){}
+                        }
+                    }
+                }
+            }
+            TextView chargeTotal=tv("Calculated Service Charge: ETB "+String.format("%.2f",employeeCharge),18); chargeTotal.setTag("SERVICE_CHARGE"); content.addView(chargeTotal);
+        }
+    }
+
     void recordsTable(){
         HorizontalScrollView scroll=new HorizontalScrollView(this);
         TableLayout table=new TableLayout(this);
@@ -406,8 +575,8 @@ public class MainActivity extends Activity {
             TableRow row=new TableRow(this);
             for(int i=0;i<7;i++){
                 String value=i<p.length?p[i]:"";
-                TextView t=tv(value,14); t.setSingleLine(true);
-                row.addView(t,new TableRow.LayoutParams(180,70));
+                TextView t=tv(value,14); t.setSingleLine(false); t.setMaxLines(5); t.setEllipsize(null);
+                row.addView(t,new TableRow.LayoutParams(180,-2));
             }
             table.addView(row);
         }
